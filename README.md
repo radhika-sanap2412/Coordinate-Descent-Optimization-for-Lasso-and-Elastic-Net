@@ -7,16 +7,13 @@ The Coordinate Descent algorithm is a crucial optimization technique for regress
 Lasso Regression: Minimizing the sum of squared errors with an L1 penalty, which encourages sparsity in the model by shrinking some coefficients to zero.
 Elastic Net Regression: Combining L1 (Lasso) and L2 (Ridge) penalties to address the limitations of Lasso, especially in datasets with highly correlated predictors.
 ## Methodology
-Algorithm Implementation
-Lasso Regression:
+
 
 The Lasso method applies an L1 penalty to encourage sparsity in the model, making it effective for feature selection.
 The Coordinate Descent algorithm was implemented to iteratively minimize the objective function with respect to each variable.
-Elastic Net Regression:
-
 Elastic Net combines the penalties of Lasso and Ridge regression, providing a balance between feature selection and model complexity.
 The Coordinate Descent algorithm was extended to handle both L1 and L2 penalties, optimizing the regularization parameters alpha (for Ridge) and lambda (for Lasso).
-Simulation Setup
+## Simulation Setup
 Data Simulation: Synthetic datasets were generated with varying degrees of correlation and noise to test the robustness of the Lasso and Elastic Net models.
 Model Evaluation: The performance of the models was evaluated using Mean Squared Error (MSE) and the number of non-zero coefficients, with the goal of finding the optimal regularization parameters.
 Performance Metrics
