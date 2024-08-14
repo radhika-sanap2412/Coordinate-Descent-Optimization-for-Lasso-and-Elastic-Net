@@ -1,0 +1,484 @@
+---
+title: "443_Report_Code"
+author: "Kyle Morton"
+date: "2023-12-05"
+output: html_document
+---
+
+# ST 443 Project Report Part 2: code 
+
+
+## Section 2.1: Component Functions
+
+2.1.1
+
+'make_covar'
+```{r}
+library(MASS)
+set.seed(47)
+
+# Function to create a covariance matrix for simulated data
+# p: number of predictors, corr: correlation coefficient between predictors
+
+make_covar <- function(p, corr = 0.5) {
+  outer(1:p, 1:p, function(x, y) {
+    corr ^ abs(x - y)
+  })
+}
+```
+
+2.1.2
+
+'compute_sim'
+```{r}
+# Function to compute simulated data based on specified beta, n, sigma, and covariance matrix
+# beta: coefficients, n: number of samples, sigma: standard deviation, covmatrix: covariance matrix
+compute_sim <- function(beta, n, sigma, covmatrix) {
+  p <- length(beta)
+  X <- mvrnorm(n, rep(0, p), covmatrix)
+  y <- X %*% beta + rnorm(n, mean = 0, sd = sigma)
+  
+  return(list(X = X, y = y))
+}
+```
+
+2.1.3
+
+'generate_sim_data'
+```{r}
+# Function to generate simulated data and split it into training, validation, and test sets.
+# This function creates a total dataset based on specified beta coefficients, correlation (corr),
+# and standard deviation (sigma). It then splits this dataset into training, validation, 
+# and test subsets based on provided sizes.
+
+generate_sim_data <- function(train, validation, test, corr, sigma, beta) {
+  
+  total <- train + validation + test
+  p <- length(beta)
+  cov <- make_covar(p)
+  simdata <- compute_sim(beta, total, sigma, cov)
+  
+  trainX <- simdata$X[1:train,]
+  validationX <- simdata$X[(train + 1):(train + validation),]
+  testX <- simdata$X[(train + validation + 1):total,]
+  
+  trainy <- simdata$y[1:train,]
+  validationy <- simdata$y[(train + 1):(train + validation),]
+  testy <- simdata$y[(train + validation + 1):total,]
+  
+  return(
+    list(
+      trainX = trainX,
+      validationX = validationX,
+      testX = testX,
+      
+      trainy = trainy,
+      validationy = validationy,
+      testy = testy
+    )
+  )
+}
+```
+
+
+## Section 2.2: Coordinate Descent Algorithms
+
+2.2.1
+
+Lasso Function Definition
+```{r}
+# Lasso Coordinate Descent Algorithm
+# lambda: regularization parameter for L1 penalty
+# trainX: matrix of training predictors, trainy: vector of training response values
+coord_desc_lasso <- function(lambda, trainX, trainy) {
+  trainX <- scale(trainX, center = TRUE, scale = TRUE)  # Standardize predictors
+  
+  p <- dim(trainX)[2]  # Number of predictors
+  n <- dim(trainX)[1]  # Number of observations
+
+  beta_hat <- rep(0.1, p)  # Initial beta coefficients
+  converged <- FALSE      # Flag for convergence
+  
+  while (!converged) {
+    beta_old <- beta_hat  # Save current state for convergence check
+    
+    for (j in 1:p) {
+      # Exclude current predictor j for partial residuals calculation
+      partial_residuals <- trainy - trainX[,-j] %*% beta_hat[-j]
+      
+      # Simple least squares coefficient for predictor j
+      beta_star_j <- (trainX[, j] %*% partial_residuals) / n
+      
+      # Update beta_j using soft thresholding
+      beta_hat[j] <- max(0, abs(beta_star_j) - lambda) * sign(beta_star_j)
+    }
+    
+    # Check for convergence
+    converged <- all(abs(beta_hat - beta_old) < 1e-5)
+  }
+
+  return(beta_hat)  # Return final beta coefficients
+}
+
+
+
+```
+
+2.2.2
+
+Elastic Net Function Definition
+```{r}
+# Elastic Net Coordinate Descent Algorithm
+# alpha: weight for L1 penalty, lambda: weight for L2 penalty
+# trainX: matrix of training predictors, trainy: vector of training response values
+coord_desc_en <- function(alpha, lambda, trainX, trainy) {
+  trainX <- scale(trainX, center = TRUE, scale = TRUE)  # Standardize predictors
+
+  p <- dim(trainX)[2]  # Number of predictors
+  n <- dim(trainX)[1]  # Number of observations
+
+  beta_hat <- rep(0.1, p)  # Initial beta coefficients
+  converged <- FALSE      # Flag for convergence
+
+  while (!converged) {
+    beta_old <- beta_hat  # Save current state for convergence check
+
+    for (j in 1:p) {
+      # Calculate partial residuals excluding current predictor j
+      partial_residuals <- trainy - trainX[,-j] %*% beta_hat[-j]
+
+      # Simple least squares coefficient for predictor j
+      beta_star_j <- (trainX[, j] %*% partial_residuals) / n
+
+      # Update beta_j using soft thresholding with L1 and L2 adjustments
+      beta_hat[j] <- max(0, abs(beta_star_j) - alpha) * sign(beta_star_j) / (1 + lambda * 2)
+    }
+
+    # Check for convergence
+    converged <- all(abs(beta_hat - beta_old) < 1e-5)
+  }
+
+  return(beta_hat)  # Return final beta coefficients
+}
+
+
+```
+
+
+## Section 2.3: Application Functions
+
+2.3.1
+
+Lasso Application Function
+```{r}
+# Function to apply Lasso algorithm on multiple datasets
+# sim_params: A list containing simulation parameters
+# lambda_range: Range of lambda values to test
+do_all_lasso <- function(sim_params, 
+                         lambda_range = seq(0.05, 1, by = 0.05)) {
+   
+  # Extracting simulation parameters: 
+  # correlation, standard deviation, coefficients, dataset sizes
+  cor <- sim_params$cor
+  sigma <- sim_params$sigma
+  beta <- sim_params$beta
+  n_ds <- sim_params$n_ds
+  train_size <- sim_params$train_size
+  validation_size <- sim_params$validation_size
+  test_size <- sim_params$test_size
+  
+  # Generate datasets for each simulation
+  datasets <- lapply(1:n_ds, function(i) {
+    generate_sim_data(train_size, validation_size, test_size, cor, sigma, beta)
+  })
+  
+  # Initialize vectors to store mean squared errors and related
+  mses = c()
+  test_mses = c()
+  test_mse_std_err = c()
+  
+  # Loop through each lambda value in the specified range
+  for (L in 1:length(lambda_range)) {
+    lambda = lambda_range[L]
+    mse = c()
+    test_mse = c()
+    non_zero_coefs = c()
+    
+    # Apply Lasso to each dataset and calculate MSEs for validation and test sets
+    for (i in 1:n_ds) {
+      dataset = datasets[[i]]
+      trainX <- dataset$trainX
+      trainy <- dataset$trainy
+      validationX <- dataset$validationX
+      validationy <- dataset$validationy
+      testX <- dataset$testX
+      testy <- dataset$testy
+      
+      # Lasso coordinate descent for each lambda
+      betas <- coord_desc_lasso(lambda, trainX, trainy)
+      
+      # Store MSEs and count of non-zero coefficients
+      mse = c(mse, mean((validationy - validationX %*% betas) ^ 2))
+      test_mse = c(test_mse, mean((testy - testX %*% betas) ^ 2))
+      non_zero_coefs = c(non_zero_coefs, sum(betas != 0))
+    }
+    
+    # Average MSEs for each lambda and store other metrics
+    mses = c(mses, mean(mse))
+    test_mses = c(test_mses, mean(test_mse))
+    test_mse_std_err = c(test_mse_std_err, sd(test_mse) / sqrt(n_ds))
+  }
+  
+  # Identify the optimal lambda value and calculate final model coefficients
+  opt_lambda <- lambda_range[which.min(mses)]
+  final_model_coefficients <- coord_desc_lasso(opt_lambda, trainX, trainy)
+  
+  # Compile and print the results in a table format
+  results_table <- data.frame(
+    Lasso_Metric = c("Validation MSE", "Test MSE", 
+               "Test MSE Std Error", "Optimal Lambda Value", "Non-Zero Coefficients"),
+    Value = c(min(mses), test_mses[which.min(mses)], 
+              test_mse_std_err[which.min(mses)], opt_lambda, sum(final_model_coefficients != 0))
+  )
+  print(results_table)
+  
+  # Display final model coefficients
+  print("Final Lasso Coefficients:")
+  print(final_model_coefficients)
+  
+}
+
+```
+
+2.3.2
+
+Elastic Net Application Function
+```{r}
+# Function to apply Elastic Net algorithm on multiple datasets
+# sim_params: A list containing simulation parameters
+# lambda_range: Range of lambda values to test
+# alpha_range: Range of alpha values to test
+do_all_en <- function(sim_params,
+                      lambda_range = seq(0.05, 1, by = 0.05),
+                      alpha_range = seq(0.05, 1, by = 0.05)) {
+  
+  # Extract simulation parameters: 
+  # correlation, standard deviation, coefficients, dataset sizes
+  cor <- sim_params$cor
+  sigma <- sim_params$sigma
+  beta <- sim_params$beta
+  n_ds <- sim_params$n_ds
+  train_size <- sim_params$train_size
+  validation_size <- sim_params$validation_size
+  test_size <- sim_params$test_size
+  
+  # Generate datasets for each simulation
+  datasets <- lapply(1:n_ds, function(i) {
+    generate_sim_data(train_size, validation_size, test_size, cor, sigma, beta)
+  })
+
+  # Initialize matrices to store:
+  # mean squared errors, standard errors, and nonzero coefficient counts
+  mses <- matrix(0, nrow = length(alpha_range), ncol = length(lambda_range))
+  val_mses <- matrix(0, nrow = length(alpha_range), ncol = length(lambda_range))
+  test_mse_se <- matrix(0, nrow = length(alpha_range), ncol = length(lambda_range))
+  nonzero_coefs <- matrix(0, nrow = length(alpha_range), ncol = length(lambda_range))
+
+  # Loop through combinations of alpha and lambda values
+  for (L in 1:length(lambda_range)) {
+    for (A in 1:length(alpha_range)) {
+      test_mse <- c()
+      
+      # Apply Elastic Net to each dataset and calculate metrics
+      for (i in 1:n_ds) {
+        dataset <- datasets[[i]]
+        trainX <- dataset$trainX
+        trainy <- dataset$trainy
+        validationX <- dataset$validationX
+        validationy <- dataset$validationy
+        testX <- dataset$testX
+        testy <- dataset$testy
+
+        betas <- coord_desc_en(alpha_range[A], lambda_range[L], trainX, trainy)
+
+        val_mse <- mean((validationy - validationX %*% betas) ^ 2)
+        test_mse_single <- mean((testy - testX %*% betas) ^ 2)
+
+        # Store results for each combination
+        val_mses[A, L] <- val_mses[A, L] + val_mse
+        mses[A, L] <- mses[A, L] + test_mse_single
+        test_mse = c(test_mse, test_mse_single)
+        nonzero_coefs[A, L] = sum(betas != 0)
+      }
+      
+      # Average the results for each combination
+      val_mses[A, L] <- val_mses[A, L] / n_ds
+      mses[A, L] <- mses[A, L] / n_ds
+      test_mse_se[A, L] <- sd(test_mse) / sqrt(n_ds)
+    }
+  }
+
+  # Identify the optimal lambda, alpha, and corresponding MSEs
+  min_mse_pos <- which(mses == min(mses), arr.ind = TRUE)
+  optimal_lambda <- lambda_range[min_mse_pos[2]]
+  optimal_alpha <- alpha_range[min_mse_pos[1]]
+  min_val_mse <- val_mses[min_mse_pos]
+  min_test_mse <- mses[min_mse_pos]
+  nonzero_count <- nonzero_coefs[min_mse_pos]
+  
+  # Calculate final model coefficients
+  final_model_coefs <- coord_desc_en(optimal_alpha, optimal_lambda, trainX, trainy)
+
+  # Compile and print results in a table format
+  results_table <- data.frame(
+    Elastic_Metric = c("Validation MSE", "Test MSE", "Test MSE Std Error", 
+               "Optimal Lambda Value", "Optimal Alpha Value", "Non-Zero Coefficients"),
+    Value = c(min_val_mse, min_test_mse, test_mse_se[min_mse_pos], 
+              optimal_lambda, optimal_alpha, nonzero_count)
+  )
+  print(results_table)
+  
+  # Display final model coefficients
+  print("Final Elastic Net Coefficients:")
+  print(final_model_coefs)
+}
+
+```
+
+
+We can now easily compare the approaches in a variety of simulated circumstances using the application functions. We investigate some alternative simulated scenarios.
+
+
+## Section 3: Simulations
+---------------------------------------
+
+### Test 1: Unclear results
+
+In this particular instance the Lasso and Elastic Net perform equivalently, with functionally the same Test MSE, Test Standard Error, and number of selected non-zero parameters.
+
+```{r}
+sim_params <- list(
+  # Simulation Settings
+  cor = 0.5, 
+  sigma = 3, 
+  beta = c(3, 1.5, 0, 0, 2, 0, 0, 0), 
+  # Simulation Size
+  n_ds = 50,
+  train_size = 20,  
+  validation_size = 20,
+  test_size = 200
+)
+
+
+set.seed(47)
+do_all_lasso(sim_params)
+do_all_en(sim_params)
+
+
+```
+
+### Test 2: Unclear results
+
+We find similar result as in Test 1. No significant difference, although Lasso appears to be slightly better in terms of MSE and standard error. In both cases 6 non-zero coefficients are selected.
+
+```{r}
+sim_params <- list(
+  # Simulation Settings
+  cor = 0.7,
+  sigma = 2,
+  beta = c(2, 2, 0, 0, 2, 0, 0, 0),
+  # Simulation Size
+  n_ds = 50,
+  train_size = 30,
+  validation_size = 30,
+  test_size = 200
+)
+
+
+set.seed(47)
+do_all_lasso(sim_params)
+do_all_en(sim_params)
+
+```
+
+### Test 3: Elastic net outperforms
+
+Elastic Net appears to perform better here. Lasso has slightly better MSE, but with a higher standard error and selects 7 coefficients to Elastic Net's 6, so Elastic net has superior variable selection in this instance.
+
+```{r}
+sim_params <- list(
+  # Simulation Settings
+  cor = 0.3,
+  sigma = 4,
+  beta = c(3, 0, 0, 2, 1.5, 0, 0, 0),
+  # Simulation Size
+  n_ds = 50,
+  train_size = 40,
+  validation_size = 40,
+  test_size = 200
+)
+
+
+set.seed(47)
+do_all_lasso(sim_params)
+do_all_en(sim_params)
+
+```
+
+
+### Test 4: Lasso arguably outperforms
+
+Lasso arguably performs better here. Elastic net has lower standard error again, but Lasso has a slightly lower test MSE and selects 6 coefficients compared to Elastic Net's 8.
+
+```{r}
+
+sim_params <- list(
+  # Simulation Settings
+  cor = 0.8,
+  sigma = 5,
+  beta = c(1, 1, 1, 0, 0, 0, 2, 2),
+  # Simulation Size
+  n_ds = 50,
+  train_size = 50,
+  validation_size = 50,
+  test_size = 200
+)
+
+
+
+set.seed(47)
+do_all_lasso(sim_params)
+do_all_en(sim_params)
+
+```
+
+### Test 5: Lasso outperforms in MSE, Elastic net selects fewer features
+
+In this interesting case, Lasso performs better at MSE by what appears to be an appreciable amount with a much lower standard error, but Elastic Net performs better at variable selection with only 6 coefficients left to Lasso's 8.
+
+```{r}
+sim_params <- list(
+  # Simulation Settings
+  cor = 0.2,
+  sigma = 1,
+  beta = c(0, 2, 3, 0, 0, 1.5, 0, 2),
+  # Simulation Size
+  n_ds = 50,
+  train_size = 25,
+  validation_size = 25,
+  test_size = 200
+)
+
+set.seed(47)
+do_all_lasso(sim_params)
+do_all_en(sim_params)
+```
+## Please Note
+
+Note that in many of these examples, the regularization parameters hit their minimum values. This suggests that the grid may not be sufficiently large or granular to have a precisely optimal regularization parameter, which could effect the results. However, both Lasso and Elastic net share the same default grid, so these results could be taken to be indicative of their comparative capabilities given this particular regularization parameter grid. Both application functions accept alternative grids and could be used for more intensive searches given sufficient computing time.
+
+
+
+
+
+
