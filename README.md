@@ -20,11 +20,9 @@ Performance Metrics
 Mean Squared Error (MSE): The primary metric used to assess the accuracy of the models in predicting the response variable.
 Number of Non-Zero Coefficients: Used to evaluate the sparsity of the models, particularly relevant for Lasso and Elastic Net where feature selection is a key goal.
 ## Results
-Lasso Regression:
 
 Consistently performed well in selecting relevant features, with the number of non-zero coefficients closely matching the true underlying model in simulated data.
 Achieved a minimal MSE of 0.03 in scenarios with moderate noise and feature correlation.
-Elastic Net Regression:
 
 Demonstrated flexibility in handling highly correlated features, outperforming Lasso in scenarios with strong feature correlation.
 The optimal combination of L1 and L2 penalties led to a 15% reduction in MSE compared to Lasso alone in specific high-correlation settings.
